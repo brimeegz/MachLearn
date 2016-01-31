@@ -1,0 +1,70 @@
+---
+title: "Machine Learning Project"
+output: html_document
+---
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(cache=TRUE)
+```
+##Summary
+In this report I describe how I fit a random forest model to a dataset related to weight lifting.  The data consists of measurements from sensors collected from six participants.  The model is used to predict how well the participants performed the lifting exercises.  Based upon the accuracy of the model on the training data set, the model predicted correctly 99.2% of the time. In addition, on the test set, 99.5% of the predictions were correct.
+
+##How the model was built
+###Loading and cleaning the data
+First, the training data was imported.
+```{r}
+dat <- data.frame(read.csv("pml-training.csv"))
+```
+According to the paper that accompanies the original dataset, many of the columns in the dataset are calculated by the authors.  In particular, mean, variance, standard deviation, max, min, amplitude, kurtosis and skewness were calculated.  Therefore, the columns associated with these calculated values, as well as time, window, and total were removed for three reasons.  First, a smaller dataset is generally faster to work with and less likely to be overfit.  Second, we are not fitting the model as a time series.  Finally, many of the values in these columns are errors (DIV/0 and NA).
+```{r}
+a <- colnames(dat)
+b<-c(grep("name",a),grep("min",a),grep("max",a),grep("total",a),grep("var",a),grep("stddev",a),grep("kurtosis",a),grep("avg",a),grep("skewness",a),grep("window",a),grep("time",a),grep("amplitude",a))
+dat2 <- dat[,-b]
+```
+ Next, we include the caret library to perform the random forest fitting as well as libraries to enable parallel processing.  
+```{r}
+library(parallel)
+library(doParallel)
+library(caret)
+```
+###Partitioning the data
+We also partition the training set into a smaller training set (75% of the data) and test set (25% of the data).  The purpose of splitting the test set is to verify the estimate of the out of sample error on a new dataset.
+```{r}
+set.seed(33833)
+inTrain = createDataPartition(dat2$classe, p = 3/4)[[1]]
+training = dat2[ inTrain,]
+testing = dat2[-inTrain,]
+```
+###Cross validation and fitting the model
+Now we fit the model using caret's train function.  The model is validated using 5-fold cross validation.  Five folds were chosen to balance several items.  More folds results in lower bias, but higher variance and longer runtimes.  Five balances this nicely.  In addition, we use all but one of the cores in order to speed up the fitting process.
+```{r}
+cluster <- makeCluster(detectCores() - 1)
+registerDoParallel(cluster)
+fitControl <- trainControl(method = "cv",number = 5,allowParallel = TRUE)
+fitrf <- train(classe ~ . - X, method="rf",data=training,trControl = fitControl, prox = TRUE)
+stopCluster(cluster)
+```
+###Model results
+The fit model is very accurate.  The best model with mtry = 2 yields an accuracy of 99.2%.
+```{r}
+fitrf$results
+```
+###Expected out of sample error
+In addition, the OOB estimate of error rate is very low at 0.54%.
+```{r}
+fitrf$finalModel
+```
+Although caret's estimate of the error rate is very low, we see that the application of the model to the testing data is about as accurate with an error rate of 0.51%.  So 0.54%, although low, is likely a reasonable estimate of the out of sample error rate, corroborated by the 0.51% error rate implied by the test data.
+```{r}
+predrf <- predict(fitrf,testing)
+confusionMatrix(predrf, testing$classe)
+```
+###Predicting the final test set
+Finally, we read in the testing data, remove the extraneous columns as before, and apply the model to the test data.
+```{r}
+dattest <- data.frame(read.csv("pml-testing.csv"))
+a <- colnames(dattest)
+b<-c(grep("name",a),grep("min",a),grep("max",a),grep("total",a),grep("var",a),grep("stddev",a),grep("kurtosis",a),grep("avg",a),grep("skewness",a),grep("window",a),grep("time",a),grep("amplitude",a))
+dattest2 <- dattest[,-b]
+predict(fitrf,dattest2)
+```
+
